@@ -1,0 +1,19 @@
+[package]
+name = "swarm-agent-runtime"
+description = "Executes a single task with a single agent: prompting, checkpointing, validation, deduplication."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+swarm-domain = { workspace = true }
+swarm-model-gateway = { workspace = true }
+swarm-shared-memory = { workspace = true }
+chrono = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "sync", "time"] }
