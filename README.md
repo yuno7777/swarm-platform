@@ -18,7 +18,8 @@ and every test passes, with no network and no API key.
 | Phase | Scope | State |
 |---|---|---|
 | 1 | Domain, DAG, queue, shared memory, gateway, agents, scheduler, engine, CLI | ✅ done |
-| 2 | Postgres, Redis Streams, gRPC, remote workers, HTTP API | 🔜 next |
+| 2a | HTTP API server, SSE event streams, Prometheus metrics | ✅ done |
+| 2b | Durable stores, gRPC, remote worker processes | 🔜 next |
 | 3 | Coordinator replicas, leader election, fencing, failover | ⬜ |
 | 4 | Dynamic spawning, full consensus modes, semantic memory, verification | ⬜ |
 | 5 | AuthN/Z, TLS, sandboxing, OpenTelemetry, dashboard, chaos suite | ⬜ |
@@ -52,6 +53,19 @@ cargo run -p swarm-admin-cli -- run --objective "Compare Raft and Paxos" --strat
 Useful flags: `--strategy` (nine DAG shapes), `--agents` (budget *and* target
 parallelism), `--placement` (four schedulers), `--json`, `--max-cost`, `--config`.
 `swarmctl strategies` lists everything this build supports.
+
+Or run the platform as its own process and drive it over HTTP:
+
+```bash
+cargo run -p swarm-api-server -- --bind 127.0.0.1:8080
+```
+
+```bash
+curl -X POST localhost:8080/v1/jobs -H 'content-type: application/json' -d '{"objective":"Compare Raft and Paxos","execution_strategy":"debate","max_agents":6}'
+```
+
+Then follow it live with `curl -N localhost:8080/v1/jobs/$JOB/events`. Full endpoint
+list in [docs/api.md](docs/api.md).
 
 ## What Phase 1 actually does
 
@@ -90,6 +104,7 @@ crates/
   model-gateway/   ModelProvider trait, deterministic mock, Gateway
   agent-runtime/   executes one task with one agent
   coordinator/     decompose · schedule · execute · aggregate
+  api-server/      swarm-api: HTTP ingress, SSE streams, metrics
   admin-cli/       swarmctl
 proto/swarm/v1/    protobuf contracts (wired up in Phase 2)
 migrations/        Postgres schema (applied in Phase 2)
@@ -106,6 +121,7 @@ Redis Streams without the engine noticing.
 - [docs/architecture.md](docs/architecture.md) — services, data flow, failure paths, sequence diagrams
 - [docs/decisions.md](docs/decisions.md) — the fifteen decisions that shaped the rest, and what each cost
 - [docs/state-machines.md](docs/state-machines.md) — every lifecycle, as diagrams and transition rules
+- [docs/api.md](docs/api.md) — HTTP endpoints, event stream, error codes, metrics
 - [docs/roadmap.md](docs/roadmap.md) — phase-by-phase plan with exit criteria
 
 ## Development

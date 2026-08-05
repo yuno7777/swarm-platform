@@ -32,9 +32,24 @@ Crates: `domain`, `task-queue`, `shared-memory`, `model-gateway`, `agent-runtime
 1000-task job and 100-agent job pass in tests; duplicate delivery proven not to
 double-execute.
 
-## Phase 2 — Durable distributed execution 🔜
+## Phase 2a — HTTP ingress ✅
 
-New crates: `protocol`, `api-server`, `worker`. (`protoc` via `protoc-bin-vendored`.)
+New crate: `api-server`.
+
+- `swarm-api` binary: job submission, cancel/pause/resume, job state, task graph,
+  intermediate results, final result, failures, transition audit trail, agents
+- Server-Sent Events stream with per-job sequence numbers
+- Prometheus `/metrics` and a `/v1/cluster` operator view
+- Typed error mapping: every `SwarmError` gets the right status code and a
+  machine-readable `kind`
+- Integration tests drive a real socket, not handler functions
+
+**Exit criteria met:** the platform runs as its own OS process and is driven entirely
+over HTTP; 16 tests cover the wire behaviour.
+
+## Phase 2b — Durable distributed execution 🔜
+
+New crates: `protocol`, `worker`. (`protoc` via `protoc-bin-vendored`.)
 
 - Postgres schema via sqlx migrations; every transition and attempt journaled
 - `PostgresJobStore`, `PostgresMemoryStore` behind the Phase 1 traits
