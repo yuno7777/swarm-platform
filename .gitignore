@@ -1,0 +1,14 @@
+/target
+**/*.rs.bk
+*.pdb
+
+# Benchmark and trace output written by swarm-bench (Phase 6).
+/benchmarks/out/
+/traces/
+
+# Local overrides of config/example.toml.
+/config/local.toml
+.env
+
+.DS_Store
+Thumbs.db
