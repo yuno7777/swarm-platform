@@ -1,0 +1,394 @@
+syntax = "proto3";
+
+package swarm.v1;
+
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/struct.proto";
+
+// ------------------------------------------------------------------ enums
+
+enum Priority {
+  PRIORITY_UNSPECIFIED = 0;
+  PRIORITY_LOW = 1;
+  PRIORITY_NORMAL = 2;
+  PRIORITY_HIGH = 3;
+  PRIORITY_CRITICAL = 4;
+}
+
+enum Capability {
+  CAPABILITY_UNSPECIFIED = 0;
+  CAPABILITY_PLANNING = 1;
+  CAPABILITY_RESEARCH = 2;
+  CAPABILITY_CODING = 3;
+  CAPABILITY_REVIEW = 4;
+  CAPABILITY_VERIFICATION = 5;
+  CAPABILITY_SUMMARIZATION = 6;
+  CAPABILITY_TOOL_USE = 7;
+  CAPABILITY_DATA_ANALYSIS = 8;
+  CAPABILITY_SECURITY_REVIEW = 9;
+  CAPABILITY_MERGING = 10;
+  CAPABILITY_GENERAL = 11;
+}
+
+enum ExecutionStrategy {
+  EXECUTION_STRATEGY_UNSPECIFIED = 0;
+  EXECUTION_STRATEGY_SEQUENTIAL = 1;
+  EXECUTION_STRATEGY_PARALLEL = 2;
+  EXECUTION_STRATEGY_HIERARCHICAL = 3;
+  EXECUTION_STRATEGY_DEBATE = 4;
+  EXECUTION_STRATEGY_MAP_REDUCE = 5;
+  EXECUTION_STRATEGY_PLANNER_EXECUTOR = 6;
+  EXECUTION_STRATEGY_SUPERVISOR_WORKER = 7;
+  EXECUTION_STRATEGY_CONSENSUS = 8;
+  EXECUTION_STRATEGY_ADAPTIVE = 9;
+}
+
+enum AgentType {
+  AGENT_TYPE_UNSPECIFIED = 0;
+  AGENT_TYPE_PLANNER = 1;
+  AGENT_TYPE_RESEARCH = 2;
+  AGENT_TYPE_CODING = 3;
+  AGENT_TYPE_CRITIC = 4;
+  AGENT_TYPE_VERIFICATION = 5;
+  AGENT_TYPE_SUMMARIZATION = 6;
+  AGENT_TYPE_TOOL_USE = 7;
+  AGENT_TYPE_DATA_ANALYSIS = 8;
+  AGENT_TYPE_SECURITY_REVIEW = 9;
+  AGENT_TYPE_RESULT_MERGER = 10;
+  AGENT_TYPE_GENERAL = 11;
+}
+
+enum TaskState {
+  TASK_STATE_UNSPECIFIED = 0;
+  TASK_STATE_CREATED = 1;
+  TASK_STATE_WAITING_FOR_DEPENDENCY = 2;
+  TASK_STATE_QUEUED = 3;
+  TASK_STATE_LEASED = 4;
+  TASK_STATE_RUNNING = 5;
+  TASK_STATE_COMPLETED = 6;
+  TASK_STATE_FAILED = 7;
+  TASK_STATE_TIMED_OUT = 8;
+  TASK_STATE_RETRY_SCHEDULED = 9;
+  TASK_STATE_PREEMPTED = 10;
+  TASK_STATE_CANCELLED = 11;
+  TASK_STATE_DEAD_LETTERED = 12;
+}
+
+enum JobStatus {
+  JOB_STATUS_UNSPECIFIED = 0;
+  JOB_STATUS_SUBMITTED = 1;
+  JOB_STATUS_ADMITTED = 2;
+  JOB_STATUS_REJECTED = 3;
+  JOB_STATUS_PLANNING = 4;
+  JOB_STATUS_RUNNING = 5;
+  JOB_STATUS_PAUSED = 6;
+  JOB_STATUS_AGGREGATING = 7;
+  JOB_STATUS_COMPLETED = 8;
+  JOB_STATUS_PARTIALLY_COMPLETED = 9;
+  JOB_STATUS_FAILED = 10;
+  JOB_STATUS_CANCELLED = 11;
+}
+
+enum AgentStatus {
+  AGENT_STATUS_UNSPECIFIED = 0;
+  AGENT_STATUS_CREATED = 1;
+  AGENT_STATUS_REGISTERED = 2;
+  AGENT_STATUS_IDLE = 3;
+  AGENT_STATUS_ASSIGNED = 4;
+  AGENT_STATUS_RUNNING = 5;
+  AGENT_STATUS_WAITING = 6;
+  AGENT_STATUS_COMPLETED = 7;
+  AGENT_STATUS_FAILED = 8;
+  AGENT_STATUS_RETRYING = 9;
+  AGENT_STATUS_TERMINATED = 10;
+}
+
+enum NodeStatus {
+  NODE_STATUS_UNSPECIFIED = 0;
+  NODE_STATUS_JOINING = 1;
+  NODE_STATUS_READY = 2;
+  NODE_STATUS_DEGRADED = 3;
+  NODE_STATUS_DRAINING = 4;
+  NODE_STATUS_UNREACHABLE = 5;
+  NODE_STATUS_REMOVED = 6;
+}
+
+enum MessageType {
+  MESSAGE_TYPE_UNSPECIFIED = 0;
+  MESSAGE_TYPE_TASK_ASSIGNMENT = 1;
+  MESSAGE_TYPE_TASK_RESULT = 2;
+  MESSAGE_TYPE_PARTIAL_RESULT = 3;
+  MESSAGE_TYPE_CLARIFICATION_REQUEST = 4;
+  MESSAGE_TYPE_AGENT_REQUEST = 5;
+  MESSAGE_TYPE_MEMORY_UPDATE = 6;
+  MESSAGE_TYPE_CONSENSUS_VOTE = 7;
+  MESSAGE_TYPE_HEARTBEAT = 8;
+  MESSAGE_TYPE_ERROR_REPORT = 9;
+  MESSAGE_TYPE_CANCELLATION = 10;
+  MESSAGE_TYPE_PROGRESS_EVENT = 11;
+  MESSAGE_TYPE_CAPABILITY_ADVERTISEMENT = 12;
+}
+
+enum ConsensusMode {
+  CONSENSUS_MODE_UNSPECIFIED = 0;
+  CONSENSUS_MODE_MAJORITY = 1;
+  CONSENSUS_MODE_WEIGHTED = 2;
+  CONSENSUS_MODE_CONFIDENCE_WEIGHTED = 3;
+  CONSENSUS_MODE_RANKED_CHOICE = 4;
+  CONSENSUS_MODE_CRITIC_VERIFIER = 5;
+  CONSENSUS_MODE_DEBATE_JUDGE = 6;
+  CONSENSUS_MODE_BYZANTINE_QUORUM = 7;
+}
+
+enum Compression {
+  COMPRESSION_NONE = 0;
+  COMPRESSION_ZSTD = 1;
+}
+
+// ------------------------------------------------------------------ envelope
+
+// Every message on every transport is wrapped in an Envelope. Required metadata
+// lives here exactly once so routing, dedup, tracing, and replay are uniform.
+message Envelope {
+  string message_id = 1;         // UUIDv7
+  string correlation_id = 2;     // constant for a logical operation
+  string causation_id = 3;       // message that caused this one, optional
+  string sender = 4;             // "coordinator:<id>" | "worker:<id>" | "agent:<id>"
+  string receiver = 5;           // point-to-point target, empty when topic is set
+  string topic = 6;              // pub/sub topic, empty when receiver is set
+  string job_id = 7;
+  string task_id = 8;
+  MessageType message_type = 9;
+  google.protobuf.Timestamp timestamp = 10;
+  uint64 sequence_number = 11;   // per (sender, job) monotonic; enables ordering
+  string trace_id = 12;          // W3C trace parent
+  string idempotency_key = 13;
+  uint32 schema_version = 14;
+  google.protobuf.Timestamp expires_at = 15; // TTL; receivers drop expired messages
+  Compression compression = 16;
+  bytes signature = 17;          // Ed25519 over the serialized payload (Phase 5)
+  bytes payload = 18;            // encoded Payload message, optionally compressed
+}
+
+message Payload {
+  oneof body {
+    TaskAssignment task_assignment = 1;
+    TaskResult task_result = 2;
+    PartialResult partial_result = 3;
+    ClarificationRequest clarification_request = 4;
+    AgentRequest agent_request = 5;
+    MemoryUpdate memory_update = 6;
+    AgentDecision consensus_vote = 7;
+    Heartbeat heartbeat = 8;
+    ErrorReport error_report = 9;
+    Cancellation cancellation = 10;
+    ProgressEvent progress_event = 11;
+    CapabilityAdvertisement capability_advertisement = 12;
+  }
+}
+
+// ------------------------------------------------------------------ core types
+
+message RetryPolicy {
+  uint32 max_attempts = 1;
+  uint64 backoff_base_ms = 2;
+  uint64 backoff_max_ms = 3;
+  bool jitter = 4;
+}
+
+message ValidationRule {
+  oneof rule {
+    bool non_empty = 1;
+    uint32 min_words = 2;
+    string must_mention = 3;
+    RequiredJsonKeys required_json_keys = 4;
+    bool compiles = 5;
+    bool tests_pass = 6;
+  }
+}
+
+message RequiredJsonKeys {
+  repeated string keys = 1;
+}
+
+message TaskNode {
+  string id = 1;
+  string job_id = 2;
+  string title = 3;
+  string description = 4;
+  string kind = 5;
+  repeated string dependencies = 6;
+  repeated Capability required_capabilities = 7;
+  uint32 estimated_complexity = 8;
+  optional uint64 estimated_tokens = 9;
+  RetryPolicy retry_policy = 10;
+  uint64 timeout_seconds = 11;
+  TaskState state = 12;
+  uint32 attempt = 13;
+  uint32 stage = 14;
+  string idempotency_key = 15;
+  repeated ValidationRule validation = 16;
+}
+
+message TaskGraph {
+  string job_id = 1;
+  repeated TaskNode nodes = 2;
+}
+
+message ModelConfig {
+  string provider = 1;
+  string model = 2;
+  float temperature = 3;
+  uint32 max_tokens = 4;
+  optional uint32 top_k = 5;
+  optional float top_p = 6;
+}
+
+message AgentDescriptor {
+  string id = 1;
+  AgentType agent_type = 2;
+  repeated Capability capabilities = 3;
+  AgentStatus status = 4;
+  string node_id = 5;
+  float current_load = 6;
+  float success_rate = 7;
+  uint64 average_latency_ms = 8;
+  ModelConfig model_config = 9;
+  optional string job_id = 10;
+}
+
+message NodeResources {
+  uint64 cpu_cores = 1;
+  uint64 total_memory_bytes = 2;
+  uint64 available_memory_bytes = 3;
+  uint64 gpu_count = 4;
+  uint64 available_gpu_memory_bytes = 5;
+  uint64 active_agents = 6;
+  uint64 active_tasks = 7;
+  float cpu_utilization = 8;
+  uint64 queue_depth = 9;
+}
+
+message Evidence {
+  string source = 1;              // URL, file path, tool name, or task id
+  string claim = 2;
+  float support = 3;              // 0..1 how strongly the source supports the claim
+  optional string locator = 4;    // line range, quote offset, timestamp
+}
+
+message AgentDecision {
+  string agent_id = 1;
+  string answer = 2;
+  float confidence = 3;
+  repeated Evidence evidence = 4;
+  string reasoning_summary = 5;   // short summary only; never raw chain-of-thought
+  google.protobuf.Timestamp timestamp = 6;
+  optional uint32 rank_order = 7;
+}
+
+// ------------------------------------------------------------------ payload bodies
+
+message TaskAssignment {
+  TaskNode task = 1;
+  string agent_id = 2;
+  string lease_id = 3;
+  google.protobuf.Timestamp lease_expires_at = 4;
+  google.protobuf.Struct context = 5;      // upstream outputs the task needs
+  repeated string allowed_tools = 6;       // capability policy for this task
+  uint64 term = 7;                         // fencing token of the assigning leader
+}
+
+message TaskResult {
+  string task_id = 1;
+  string agent_id = 2;
+  uint32 attempt = 3;
+  bool success = 4;
+  string output = 5;
+  google.protobuf.Struct structured_output = 6;
+  repeated Evidence evidence = 7;
+  string reasoning_summary = 8;
+  float confidence = 9;
+  bool validation_passed = 10;
+  repeated string validation_failures = 11;
+  uint64 tokens_in = 12;
+  uint64 tokens_out = 13;
+  double cost_usd = 14;
+  uint64 duration_ms = 15;
+  optional string error_kind = 16;
+  optional string error_message = 17;
+}
+
+message PartialResult {
+  string task_id = 1;
+  string agent_id = 2;
+  uint32 checkpoint_seq = 3;
+  string label = 4;
+  google.protobuf.Struct state = 5;
+  float progress = 6;             // 0..1
+}
+
+message ClarificationRequest {
+  string task_id = 1;
+  string asking_agent_id = 2;
+  string question = 3;
+  repeated string blocking_on_task_ids = 4;
+}
+
+message AgentRequest {
+  string task_id = 1;
+  string asking_agent_id = 2;
+  AgentType requested_type = 3;
+  repeated Capability required_capabilities = 4;
+  string reason = 5;
+  uint32 spawn_depth = 6;         // guards runaway recursive spawning
+}
+
+message MemoryUpdate {
+  string namespace = 1;
+  string key = 2;
+  google.protobuf.Value value = 3;
+  uint64 expected_version = 4;    // 0 = create-only, otherwise CAS
+  optional google.protobuf.Timestamp expires_at = 5;
+}
+
+message Heartbeat {
+  string node_id = 1;
+  optional string agent_id = 2;
+  NodeStatus node_status = 3;
+  NodeResources resources = 4;
+  repeated string held_lease_ids = 5;
+  uint64 uptime_seconds = 6;
+}
+
+message ErrorReport {
+  string kind = 1;
+  string message = 2;
+  bool retryable = 3;
+  optional string task_id = 4;
+  optional string agent_id = 5;
+}
+
+message Cancellation {
+  string job_id = 1;
+  repeated string task_ids = 2;   // empty = whole job
+  string reason = 3;
+  bool drain = 4;                 // true = let running tasks finish
+}
+
+message ProgressEvent {
+  string job_id = 1;
+  optional string task_id = 2;
+  string kind = 3;                // task_queued|task_started|task_completed|...
+  string detail = 4;
+  float job_progress = 5;         // 0..1
+  uint64 sequence_number = 6;
+}
+
+message CapabilityAdvertisement {
+  string agent_id = 1;
+  string node_id = 2;
+  AgentType agent_type = 3;
+  repeated Capability capabilities = 4;
+  ModelConfig model_config = 5;
+  uint32 max_concurrent_tasks = 6;
+}
