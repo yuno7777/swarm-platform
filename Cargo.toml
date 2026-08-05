@@ -17,11 +17,17 @@ swarm-shared-memory = { path = "crates/shared-memory" }
 swarm-model-gateway = { path = "crates/model-gateway" }
 swarm-agent-runtime = { path = "crates/agent-runtime" }
 swarm-coordinator = { path = "crates/coordinator" }
+swarm-api-server = { path = "crates/api-server" }
 
 # runtime
 tokio = { version = "1", default-features = false }
+tokio-stream = { version = "0.1", features = ["sync"] }
 async-trait = "0.1"
 futures = "0.3"
+
+# http
+axum = "0.7"
+reqwest = { version = "0.12", default-features = false, features = ["json", "stream"] }
 
 # data
 serde = { version = "1", features = ["derive"] }

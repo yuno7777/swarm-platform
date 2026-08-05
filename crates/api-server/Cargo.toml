@@ -1,0 +1,32 @@
+[package]
+name = "swarm-api-server"
+description = "HTTP ingress for the swarm platform: job submission, inspection, and live event streams."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "swarm-api"
+path = "src/main.rs"
+
+[dependencies]
+swarm-coordinator = { workspace = true }
+swarm-domain = { workspace = true }
+swarm-model-gateway = { workspace = true }
+swarm-task-queue = { workspace = true }
+anyhow = { workspace = true }
+axum = { workspace = true }
+chrono = { workspace = true }
+clap = { workspace = true }
+futures = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "net", "signal", "time"] }
+tokio-stream = { workspace = true }
+toml = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+
+[dev-dependencies]
+reqwest = { workspace = true }
