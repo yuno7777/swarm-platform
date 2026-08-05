@@ -1,0 +1,54 @@
+# Swarm Platform configuration.
+#
+#   swarmctl --config config/example.toml demo research
+#   SWARM_CONFIG=config/example.toml swarmctl run --objective "..."
+#
+# Every key is optional: what you leave out keeps its built-in default, so this file
+# doubles as documentation of the knobs. Log level comes from RUST_LOG (or --log).
+
+[coordinator]
+# Placement strategy: round_robin | least_loaded | capability_weighted | adaptive
+scheduler = "capability_weighted"
+
+# Agents this coordinator may hold across all jobs at once. Admission control refuses
+# a job whose max_agents would exceed it.
+max_cluster_agents = 512
+
+# Visibility timeout granted with each task lease, in milliseconds. A worker that
+# neither acknowledges nor extends within this window loses the task to someone else.
+lease_ms = 60000
+
+# Events buffered per job. A subscriber that falls further behind than this misses
+# events and sees the gap in the sequence numbers.
+event_buffer = 1024
+
+# Pause between scheduling ticks when there is nothing to dispatch, in milliseconds.
+tick_ms = 5
+
+# Safety valve: the most scheduling ticks one job may consume before the engine gives
+# up. Reaching it is a bug, not a workload characteristic.
+max_ticks = 100000
+
+# How long an idle agent is kept warm before being reclaimed, in milliseconds.
+agent_idle_timeout_ms = 30000
+
+[gateway]
+# Model calls in flight across the whole process.
+max_concurrent = 32
+
+# Serve identical requests from cache. Retries after a failed validation bypass it
+# automatically, so this never turns a retry into a no-op.
+cache_enabled = true
+cache_capacity = 4096
+
+# Attempts per provider, including the first, before falling back to the next one.
+max_attempts = 3
+retry_backoff_ms = 50
+
+# Consecutive failures before a provider's breaker opens, and how long it stays open.
+circuit_failure_threshold = 5
+circuit_reset_ms = 5000
+
+# Total spend ceiling in USD. Uncomment to enforce one; calls past it are refused
+# rather than merely reported.
+# budget_usd = 25.0
