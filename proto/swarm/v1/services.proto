@@ -1,0 +1,426 @@
+syntax = "proto3";
+
+package swarm.v1;
+
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/struct.proto";
+import "swarm/v1/common.proto";
+
+// ------------------------------------------------------------------ job control
+
+message JobRequest {
+  string objective = 1;
+  optional string context = 2;
+  Priority priority = 3;
+  optional google.protobuf.Timestamp deadline = 4;
+  uint32 max_agents = 5;
+  optional double max_cost_usd = 6;
+  optional uint64 max_runtime_seconds = 7;
+  repeated Capability required_capabilities = 8;
+  ExecutionStrategy execution_strategy = 9;
+  optional string idempotency_key = 10;
+  map<string, string> labels = 11;
+}
+
+message SubmitJobResponse {
+  string job_id = 1;
+  JobStatus status = 2;
+  string correlation_id = 3;
+  optional string rejection_reason = 4;
+}
+
+message JobRef {
+  string job_id = 1;
+  optional string reason = 2;
+}
+
+message JobStateResponse {
+  string job_id = 1;
+  JobStatus status = 2;
+  ExecutionStrategy execution_strategy = 3;
+  uint32 tasks_total = 4;
+  uint32 tasks_completed = 5;
+  uint32 tasks_failed = 6;
+  uint32 tasks_running = 7;
+  uint32 active_agents = 8;
+  uint64 tokens_used = 9;
+  double cost_usd = 10;
+  float progress = 11;
+  google.protobuf.Timestamp created_at = 12;
+  optional google.protobuf.Timestamp finished_at = 13;
+}
+
+message StructuredOutput {
+  string task_id = 1;
+  string kind = 2;
+  string title = 3;
+  string content = 4;
+  google.protobuf.Struct data = 5;
+  float confidence = 6;
+}
+
+message Conflict {
+  string description = 1;
+  repeated string claims = 2;
+  repeated string task_ids = 3;
+  ConsensusMode attempted_resolution = 4;
+  optional string resolution = 5;
+}
+
+message ExecutionStatistics {
+  uint64 wall_clock_ms = 1;
+  uint32 tasks_total = 2;
+  uint32 tasks_succeeded = 3;
+  uint32 tasks_failed = 4;
+  uint32 tasks_retried = 5;
+  uint32 agents_spawned = 6;
+  uint64 model_requests = 7;
+  uint64 tokens_in = 8;
+  uint64 tokens_out = 9;
+  double cost_usd = 10;
+  uint64 median_task_latency_ms = 11;
+  uint64 p95_task_latency_ms = 12;
+  uint64 p99_task_latency_ms = 13;
+  uint64 queue_wait_ms_total = 14;
+  uint64 messages_sent = 15;
+}
+
+message FinalResult {
+  string job_id = 1;
+  JobStatus status = 2;
+  string summary = 3;
+  repeated StructuredOutput outputs = 4;
+  repeated Evidence supporting_evidence = 5;
+  float confidence_score = 6;
+  repeated Conflict unresolved_conflicts = 7;
+  ExecutionStatistics execution_statistics = 8;
+}
+
+message TaskFailure {
+  string task_id = 1;
+  uint32 attempt = 2;
+  string error_kind = 3;
+  string error_message = 4;
+  bool dead_lettered = 5;
+  repeated string validation_failures = 6;
+  google.protobuf.Timestamp at = 7;
+}
+
+message FailureList {
+  repeated TaskFailure failures = 1;
+}
+
+message OutputList {
+  repeated StructuredOutput outputs = 1;
+}
+
+message EventStreamRequest {
+  string job_id = 1;
+  uint64 from_sequence = 2;   // replay from journal, 0 = live only
+}
+
+message TraceRequest {
+  string job_id = 1;
+}
+
+message TraceChunk {
+  bytes data = 1;             // newline-delimited JSON spans
+  bool last = 2;
+}
+
+// Submitted by clients; served by api-server, forwarded to the coordinator leader.
+service JobService {
+  rpc SubmitJob(JobRequest) returns (SubmitJobResponse);
+  rpc CancelJob(JobRef) returns (JobStateResponse);
+  rpc PauseJob(JobRef) returns (JobStateResponse);
+  rpc ResumeJob(JobRef) returns (JobStateResponse);
+  rpc RetryJob(JobRef) returns (JobStateResponse);
+  rpc GetJobState(JobRef) returns (JobStateResponse);
+  rpc GetTaskGraph(JobRef) returns (TaskGraph);
+  rpc GetIntermediateOutputs(JobRef) returns (OutputList);
+  rpc GetFinalResult(JobRef) returns (FinalResult);
+  rpc InspectFailures(JobRef) returns (FailureList);
+  rpc StreamJobEvents(EventStreamRequest) returns (stream ProgressEvent);
+  rpc DownloadTrace(TraceRequest) returns (stream TraceChunk);
+}
+
+// ------------------------------------------------------------------ coordinator <-> worker
+
+message RegisterNodeRequest {
+  string node_id = 1;
+  string address = 2;
+  NodeResources resources = 3;
+  map<string, string> labels = 4;
+  string version = 5;
+}
+
+message RegisterNodeResponse {
+  bool accepted = 1;
+  uint64 heartbeat_interval_ms = 2;
+  uint64 lease_duration_ms = 3;
+  uint64 term = 4;              // current leader term; workers reject stale leaders
+  string leader_id = 5;
+  optional string rejection_reason = 6;
+}
+
+message HeartbeatResponse {
+  bool known = 1;               // false => re-register
+  uint64 term = 2;
+  string leader_id = 3;
+  bool drain_requested = 4;
+  bool pause_scheduling = 5;
+  repeated string revoked_lease_ids = 6;
+  uint32 target_agent_count = 7;
+}
+
+message LeaseTasksRequest {
+  string node_id = 1;
+  uint32 max_tasks = 2;
+  repeated Capability offered_capabilities = 3;
+  repeated string queues = 4;
+  uint64 lease_duration_ms = 5;
+}
+
+message LeaseTasksResponse {
+  repeated TaskAssignment assignments = 1;
+  uint64 backoff_ms = 2;        // >0 => queue empty or backpressure, wait
+}
+
+message ExtendLeaseRequest {
+  string lease_id = 1;
+  uint64 additional_ms = 2;
+  float progress = 3;
+}
+
+message ExtendLeaseResponse {
+  bool extended = 1;
+  google.protobuf.Timestamp expires_at = 2;
+  optional string reason = 3;   // "expired" | "revoked" | "stale_term"
+}
+
+message AckResponse {
+  bool accepted = 1;
+  optional string reason = 2;   // "stale_lease" | "already_completed" | "stale_term"
+}
+
+message SpawnAgentRequest {
+  string job_id = 1;
+  AgentType agent_type = 2;
+  repeated Capability capabilities = 3;
+  ModelConfig model_config = 4;
+  uint32 count = 5;
+}
+
+message SpawnAgentResponse {
+  repeated AgentDescriptor agents = 1;
+  optional string rejection_reason = 2;   // quota, resources, spawn depth
+}
+
+message TerminateAgentRequest {
+  repeated string agent_ids = 1;
+  bool graceful = 2;
+  string reason = 3;
+}
+
+message Empty {}
+
+// Served by the coordinator; called by workers.
+service CoordinatorService {
+  rpc RegisterNode(RegisterNodeRequest) returns (RegisterNodeResponse);
+  rpc Heartbeat(Heartbeat) returns (HeartbeatResponse);
+  rpc LeaseTasks(LeaseTasksRequest) returns (LeaseTasksResponse);
+  rpc ExtendLease(ExtendLeaseRequest) returns (ExtendLeaseResponse);
+  rpc ReportResult(TaskResult) returns (AckResponse);
+  rpc ReportPartial(PartialResult) returns (AckResponse);
+  rpc RequestAgent(AgentRequest) returns (SpawnAgentResponse);
+  rpc SubmitVote(AgentDecision) returns (AckResponse);
+  rpc AdvertiseCapability(CapabilityAdvertisement) returns (Empty);
+}
+
+// Served by workers; called by the coordinator.
+service WorkerService {
+  rpc SpawnAgents(SpawnAgentRequest) returns (SpawnAgentResponse);
+  rpc TerminateAgents(TerminateAgentRequest) returns (Empty);
+  rpc CancelTasks(Cancellation) returns (Empty);
+  rpc Drain(Empty) returns (Empty);
+  rpc DescribeNode(Empty) returns (Heartbeat);
+}
+
+// ------------------------------------------------------------------ shared memory
+
+message GetRequest {
+  string namespace = 1;
+  string key = 2;
+}
+
+message MemoryRecord {
+  string id = 1;
+  optional string job_id = 2;
+  optional string agent_id = 3;
+  string namespace = 4;
+  string key = 5;
+  google.protobuf.Value value = 6;
+  uint64 version = 7;
+  google.protobuf.Timestamp created_at = 8;
+  google.protobuf.Timestamp updated_at = 9;
+  optional google.protobuf.Timestamp expires_at = 10;
+}
+
+message GetResponse {
+  optional MemoryRecord record = 1;
+}
+
+message PutResponse {
+  uint64 version = 1;
+  bool created = 2;
+}
+
+message CasResponse {
+  bool applied = 1;
+  uint64 current_version = 2;
+  optional MemoryRecord current = 3;   // returned on conflict for merge logic
+}
+
+message ListRequest {
+  string namespace = 1;
+  string key_prefix = 2;
+  uint32 limit = 3;
+  optional string job_id = 4;
+}
+
+message ListResponse {
+  repeated MemoryRecord records = 1;
+}
+
+message DeleteRequest {
+  string namespace = 1;
+  string key = 2;
+  uint64 expected_version = 3;   // 0 = unconditional
+}
+
+message SemanticQuery {
+  string namespace = 1;
+  string query = 2;
+  uint32 top_k = 3;
+  optional string job_id = 4;
+  float min_score = 5;
+}
+
+message SemanticHit {
+  MemoryRecord record = 1;
+  float score = 2;
+}
+
+message SemanticResponse {
+  repeated SemanticHit hits = 1;
+}
+
+message WatchRequest {
+  string namespace = 1;
+  string key_prefix = 2;
+}
+
+service MemoryService {
+  rpc Get(GetRequest) returns (GetResponse);
+  rpc Put(MemoryUpdate) returns (PutResponse);
+  rpc CompareAndSwap(MemoryUpdate) returns (CasResponse);
+  rpc Delete(DeleteRequest) returns (Empty);
+  rpc List(ListRequest) returns (ListResponse);
+  rpc SemanticSearch(SemanticQuery) returns (SemanticResponse);
+  rpc Watch(WatchRequest) returns (stream MemoryRecord);
+}
+
+// ------------------------------------------------------------------ model gateway
+
+message Message {
+  string role = 1;               // system|user|assistant|tool
+  string content = 2;
+  optional string name = 3;
+}
+
+message CompletionRequest {
+  string model = 1;
+  repeated Message messages = 2;
+  optional uint32 max_tokens = 3;
+  optional float temperature = 4;
+  repeated string stop = 5;
+  bool json_mode = 6;
+  optional string json_schema = 7;
+  string idempotency_key = 8;
+  optional string job_id = 9;
+  optional string task_id = 10;
+  optional string agent_id = 11;
+}
+
+message CompletionResponse {
+  string text = 1;
+  string provider = 2;
+  string model = 3;
+  uint64 tokens_in = 4;
+  uint64 tokens_out = 5;
+  double cost_usd = 6;
+  uint64 latency_ms = 7;
+  bool cached = 8;
+  string finish_reason = 9;
+}
+
+message TokenChunk {
+  string text = 1;
+  bool last = 2;
+  optional string finish_reason = 3;
+}
+
+message ProviderHealth {
+  string provider = 1;
+  bool healthy = 2;
+  uint64 latency_ms = 3;
+  bool circuit_open = 4;
+  optional uint64 rate_limit_reset_ms = 5;
+  optional string detail = 6;
+}
+
+service ModelGatewayService {
+  rpc Complete(CompletionRequest) returns (CompletionResponse);
+  rpc Stream(CompletionRequest) returns (stream TokenChunk);
+  rpc Health(Empty) returns (ProviderHealth);
+}
+
+// ------------------------------------------------------------------ cluster admin
+
+message ClusterState {
+  string leader_id = 1;
+  uint64 term = 2;
+  repeated AgentDescriptor agents = 3;
+  repeated Heartbeat nodes = 4;
+  uint64 queue_depth = 5;
+  uint64 dead_letter_depth = 6;
+  bool scheduling_paused = 7;
+  uint32 active_jobs = 8;
+}
+
+message DrainNodeRequest {
+  string node_id = 1;
+  bool force = 2;
+}
+
+message SetLimitsRequest {
+  optional uint32 max_agents_per_job = 1;
+  optional uint32 max_cluster_agents = 2;
+  optional uint32 max_concurrent_model_calls = 3;
+  optional uint64 max_tokens_per_minute = 4;
+}
+
+message PauseSchedulingRequest {
+  bool paused = 1;
+  string reason = 2;
+}
+
+service AdminService {
+  rpc GetClusterState(Empty) returns (ClusterState);
+  rpc DrainNode(DrainNodeRequest) returns (Empty);
+  rpc SetLimits(SetLimitsRequest) returns (Empty);
+  rpc PauseScheduling(PauseSchedulingRequest) returns (Empty);
+  rpc StepDownLeader(Empty) returns (Empty);         // controlled failover drill
+  rpc ListDeadLetters(Empty) returns (FailureList);
+  rpc ReplayDeadLetter(JobRef) returns (AckResponse);
+}
