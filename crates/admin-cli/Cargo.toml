@@ -1,0 +1,23 @@
+[package]
+name = "swarm-admin-cli"
+description = "swarmctl: submit, watch, and inspect swarm jobs."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "swarmctl"
+path = "src/main.rs"
+
+[dependencies]
+swarm-coordinator = { workspace = true }
+swarm-domain = { workspace = true }
+swarm-model-gateway = { workspace = true }
+anyhow = { workspace = true }
+clap = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+toml = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "signal", "time"] }
+tracing-subscriber = { workspace = true }
