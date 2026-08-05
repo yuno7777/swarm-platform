@@ -1,0 +1,24 @@
+[package]
+name = "swarm-coordinator"
+description = "Decomposition, scheduling, execution, and aggregation for swarm jobs."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+swarm-domain = { workspace = true }
+swarm-agent-runtime = { workspace = true }
+swarm-model-gateway = { workspace = true }
+swarm-shared-memory = { workspace = true }
+swarm-task-queue = { workspace = true }
+chrono = { workspace = true }
+dashmap = { workspace = true }
+futures = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true, features = ["rt", "sync", "time", "macros"] }
+tracing = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "sync", "time"] }
