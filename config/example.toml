@@ -52,3 +52,10 @@ circuit_reset_ms = 5000
 # Total spend ceiling in USD. Uncomment to enforce one; calls past it are refused
 # rather than merely reported.
 # budget_usd = 25.0
+
+# Durability is a command-line concern rather than a config one, because it decides
+# what happens before the config is even read:
+#
+#   swarm-api --journal ./swarm.journal
+#
+# With a journal, jobs survive a restart of the process; without one they do not.

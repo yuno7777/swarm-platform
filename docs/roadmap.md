@@ -47,7 +47,25 @@ New crate: `api-server`.
 **Exit criteria met:** the platform runs as its own OS process and is driven entirely
 over HTTP; 16 tests cover the wire behaviour.
 
-## Phase 2b — Durable distributed execution 🔜
+## Phase 2b — Crash recovery ✅
+
+New crate: `persistence`.
+
+- `Journal` trait: an ordered, append-only log of everything that happens to a job
+- `FileJournal`: JSON lines, fsynced per append, tolerant of a torn final record and
+  loud about corruption anywhere else
+- `MemoryJournal`: the default, so the write path is identical whether or not
+  durability is configured
+- Coordinator journals every task transition, result, failure, and status change
+- `Coordinator::recover()` replays the log into live job state: completed tasks keep
+  their results, mid-flight tasks return to the ready set, spent attempts still count
+- `swarm-api --journal <path>` recovers before it starts serving
+
+**Exit criteria met:** a coordinator aborted mid-job resumes without redoing completed
+work — proven by restored results keeping their original agent and timestamp — and
+`kill -9` on the API server followed by a restart brings the job back.
+
+## Phase 2c — Distributed execution 🔜
 
 New crates: `protocol`, `worker`. (`protoc` via `protoc-bin-vendored`.)
 

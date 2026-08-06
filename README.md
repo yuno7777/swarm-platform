@@ -19,7 +19,8 @@ and every test passes, with no network and no API key.
 |---|---|---|
 | 1 | Domain, DAG, queue, shared memory, gateway, agents, scheduler, engine, CLI | ✅ done |
 | 2a | HTTP API server, SSE event streams, Prometheus metrics | ✅ done |
-| 2b | Durable stores, gRPC, remote worker processes | 🔜 next |
+| 2b | Append-only journal, crash recovery, resume-not-restart | ✅ done |
+| 2c | gRPC, remote worker processes, Redis/Postgres backends | 🔜 next |
 | 3 | Coordinator replicas, leader election, fencing, failover | ⬜ |
 | 4 | Dynamic spawning, full consensus modes, semantic memory, verification | ⬜ |
 | 5 | AuthN/Z, TLS, sandboxing, OpenTelemetry, dashboard, chaos suite | ⬜ |
@@ -67,6 +68,10 @@ curl -X POST localhost:8080/v1/jobs -H 'content-type: application/json' -d '{"ob
 Then follow it live with `curl -N localhost:8080/v1/jobs/$JOB/events`. Full endpoint
 list in [docs/api.md](docs/api.md).
 
+Add `--journal ./swarm.journal` and jobs survive the process. Kill the server mid-job,
+start it again on the same journal, and it picks up where it stopped — completed tasks
+keep their results and are never re-run.
+
 ## What Phase 1 actually does
 
 - **Nine execution strategies** — sequential, parallel, hierarchical, debate,
@@ -105,6 +110,7 @@ crates/
   agent-runtime/   executes one task with one agent
   coordinator/     decompose · schedule · execute · aggregate
   api-server/      swarm-api: HTTP ingress, SSE streams, metrics
+  persistence/     append-only journal and crash recovery
   admin-cli/       swarmctl
 proto/swarm/v1/    protobuf contracts (wired up in Phase 2)
 migrations/        Postgres schema (applied in Phase 2)

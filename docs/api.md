@@ -7,8 +7,15 @@ event stream (`text/event-stream`).
 cargo run -p swarm-api-server -- --bind 127.0.0.1:8080
 ```
 
-Flags: `--bind` (or `SWARM_BIND`), `--config` (or `SWARM_CONFIG`), `--log`. Ctrl-C
-shuts down gracefully, letting in-flight requests finish.
+Flags: `--bind` (or `SWARM_BIND`), `--config` (or `SWARM_CONFIG`), `--journal` (or
+`SWARM_JOURNAL`), `--log`. Ctrl-C shuts down gracefully, letting in-flight requests
+finish.
+
+With `--journal ./swarm.journal`, every job state change is appended to disk and
+replayed at start-up *before* the socket is bound, so a client never sees a job that
+is about to be resurrected under it. Completed tasks keep their results across the
+restart and are not re-run; tasks that were in flight go back into the ready set.
+Without the flag, jobs live only as long as the process.
 
 ## Endpoints
 
