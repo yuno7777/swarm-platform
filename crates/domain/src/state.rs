@@ -192,7 +192,10 @@ impl StateMachine for NodeStatus {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Transition<S> {
     /// Entity kind the transition belongs to.
-    pub entity: &'static str,
+    ///
+    /// Owned rather than `&'static str` because transitions are journaled and read
+    /// back: a borrowed field would make the record impossible to deserialize.
+    pub entity: String,
     /// Previous state; `None` for the initial state of a new entity.
     pub from: Option<S>,
     /// New state.
@@ -220,7 +223,7 @@ impl<S: StateMachine> Transition<S> {
         correlation_id: CorrelationId,
     ) -> Self {
         Self {
-            entity: S::ENTITY,
+            entity: S::ENTITY.to_owned(),
             from,
             to,
             actor: actor.into(),
