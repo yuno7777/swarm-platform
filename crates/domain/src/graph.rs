@@ -398,6 +398,24 @@ impl TaskGraph {
         Ok(transition)
     }
 
+    /// Set a task's state during journal replay, without validating the edge.
+    ///
+    /// Replay is not a state change: the transition was validated and audited when it
+    /// first happened, and the record is the truth. Re-validating here would make
+    /// recovery fail on a log whose tail was lost to the very crash we are recovering
+    /// from. This is the only sanctioned way to bypass [`Self::set_state`].
+    pub fn restore_state(&mut self, task: TaskId, state: TaskState) -> Result<()> {
+        let node = self
+            .nodes
+            .get_mut(&task)
+            .ok_or_else(|| SwarmError::NotFound {
+                kind: "task",
+                id: task.to_string(),
+            })?;
+        node.state = state;
+        Ok(())
+    }
+
     /// Task counts by lifecycle group.
     #[must_use]
     pub fn counts(&self) -> GraphCounts {
@@ -703,6 +721,28 @@ mod tests {
             )
             .is_err());
         assert_eq!(graph.get(ids[0]).unwrap().state, TaskState::Queued);
+    }
+
+    #[test]
+    fn replay_can_restore_a_state_the_state_machine_would_refuse_to_reach() {
+        let (mut graph, ids) = diamond();
+        // Created -> Completed is not an edge, but it is a legitimate *restore*: the
+        // task really did complete before the coordinator died.
+        assert!(graph
+            .set_state(
+                ids[0],
+                TaskState::Completed,
+                "test",
+                None,
+                CorrelationId::new()
+            )
+            .is_err());
+
+        graph.restore_state(ids[0], TaskState::Completed).unwrap();
+        assert_eq!(graph.get(ids[0]).unwrap().state, TaskState::Completed);
+        assert!(graph
+            .restore_state(TaskId::new(), TaskState::Queued)
+            .is_err());
     }
 
     #[test]
