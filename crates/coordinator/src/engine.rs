@@ -21,6 +21,7 @@ use swarm_domain::{
     AgentDescriptor, AgentStatus, AgentType, Capability, CorrelationId, FinalResult, JobStatus,
     Result, StateMachine, SwarmError, TaskFailure, TaskId, TaskNode, TaskResult, TaskState,
 };
+use swarm_persistence::JournalRecord;
 use swarm_task_queue::{QueuedTask, TaskLease};
 
 use crate::aggregate::aggregate;
@@ -221,7 +222,7 @@ fn past_deadline(handle: &Arc<JobHandle>) -> bool {
     lock(&handle.job).is_past_deadline(Utc::now())
 }
 
-/// Record a task state change, keeping the audit trail complete.
+/// Record a task state change, keeping the audit trail complete and durable.
 fn advance(
     handle: &Arc<JobHandle>,
     task: TaskId,
@@ -230,10 +231,20 @@ fn advance(
     reason: &str,
     correlation_id: CorrelationId,
 ) -> Result<()> {
-    let transition = {
+    let (transition, job_id, attempt) = {
         let mut graph = lock(&handle.graph);
-        graph.set_state(task, to, actor, Some(reason.to_owned()), correlation_id)?
+        let transition =
+            graph.set_state(task, to, actor, Some(reason.to_owned()), correlation_id)?;
+        let attempt = graph.get(task).map_or(0, |node| node.attempt);
+        (transition, graph.job_id(), attempt)
     };
+
+    handle.journal(&JournalRecord::TaskTransitioned {
+        job_id,
+        transition: Box::new(transition.clone()),
+        task_id: task,
+        attempt,
+    });
     lock(&handle.transitions).push(transition);
     Ok(())
 }
@@ -876,6 +887,10 @@ fn record_success(
     }
     lock(&handle.latencies).push(result.duration_ms);
     lock(&handle.results).push(result.clone());
+    handle.journal(&JournalRecord::TaskCompleted {
+        job_id: result.job_id,
+        result: Box::new(result.clone()),
+    });
 }
 
 /// Move a failed task to its next state and record the failure.
@@ -907,7 +922,7 @@ fn fail_task(
     };
     advance(handle, task.id, next, actor, error_kind, correlation_id)?;
 
-    lock(&handle.failures).push(TaskFailure {
+    let failure = TaskFailure {
         task_id: task.id,
         title: task.title.clone(),
         attempt: task.attempt,
@@ -916,7 +931,12 @@ fn fail_task(
         dead_lettered: next == TaskState::DeadLettered,
         validation_failures,
         at: Utc::now(),
+    };
+    handle.journal(&JournalRecord::TaskFailed {
+        job_id: task.job_id,
+        failure: Box::new(failure.clone()),
     });
+    lock(&handle.failures).push(failure);
 
     {
         let mut statistics = lock(&handle.statistics);
@@ -1129,6 +1149,10 @@ async fn finish(
         )
     });
     handle.set_status(status, reason)?;
+    handle.journal(&JournalRecord::JobFinished {
+        job_id: final_result.job_id,
+        result: Box::new(final_result.clone()),
+    });
     *lock(&handle.final_result) = Some(final_result.clone());
 
     // Free the job's agents back to the cluster budget.

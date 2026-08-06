@@ -10,6 +10,7 @@ license.workspace = true
 swarm-domain = { workspace = true }
 swarm-agent-runtime = { workspace = true }
 swarm-model-gateway = { workspace = true }
+swarm-persistence = { workspace = true }
 swarm-shared-memory = { workspace = true }
 swarm-task-queue = { workspace = true }
 chrono = { workspace = true }
@@ -21,4 +22,5 @@ tokio = { workspace = true, features = ["rt", "sync", "time", "macros"] }
 tracing = { workspace = true }
 
 [dev-dependencies]
+tempfile = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "sync", "time"] }

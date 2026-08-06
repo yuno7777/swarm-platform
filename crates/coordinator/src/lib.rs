@@ -31,8 +31,11 @@
 pub mod aggregate;
 pub mod decompose;
 pub mod engine;
+/// Journal replay. Internal: it hands back a `JobHandle`, which is a crate detail.
+pub(crate) mod recovery;
 pub mod schedule;
 
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
@@ -48,6 +51,7 @@ use swarm_domain::{
     TaskResult, TaskState, Transition,
 };
 use swarm_model_gateway::Gateway;
+use swarm_persistence::{Journal, JournalRecord, MemoryJournal};
 use swarm_shared_memory::{InMemoryStore, MemoryStore};
 use swarm_task_queue::{InMemoryQueue, TaskQueue};
 
@@ -201,13 +205,15 @@ pub(crate) struct JobHandle {
     pub(crate) events: broadcast::Sender<JobEvent>,
     pub(crate) control: watch::Sender<Control>,
     pub(crate) sequence: AtomicU64,
+    pub(crate) journal: Arc<dyn Journal>,
 }
 
 impl JobHandle {
-    fn new(job: Job, graph: TaskGraph, event_buffer: usize) -> Self {
+    fn new(job: Job, graph: TaskGraph, event_buffer: usize, journal: Arc<dyn Journal>) -> Self {
         let (events, _) = broadcast::channel(event_buffer.max(16));
         let (control, _) = watch::channel(Control::Running);
         Self {
+            journal,
             job: Mutex::new(job),
             graph: Mutex::new(graph),
             agents: Mutex::new(Vec::new()),
@@ -245,18 +251,39 @@ impl JobHandle {
         let _ = self.events.send(event);
     }
 
+    /// Append a record to the journal.
+    ///
+    /// A failing journal is logged loudly but does not abort the job: losing
+    /// durability is bad, losing the running work as well is worse. The operator sees
+    /// the error and the job keeps going.
+    pub(crate) fn journal(&self, record: &JournalRecord) {
+        if let Err(error) = self.journal.append(record) {
+            tracing::error!(kind = record.kind(), %error, "journal append failed");
+        }
+    }
+
     /// Move the job to a new status, recording the reason.
     pub(crate) fn set_status(&self, to: JobStatus, reason: Option<String>) -> Result<()> {
-        let mut job = lock(&self.job);
-        let next = job.status.transition(to)?;
-        job.status = next;
-        job.status_reason = reason;
-        if next == JobStatus::Running && job.started_at.is_none() {
-            job.started_at = Some(Utc::now());
-        }
-        if next.is_finished() {
-            job.finished_at = Some(Utc::now());
-        }
+        let (job_id, next) = {
+            let mut job = lock(&self.job);
+            let next = job.status.transition(to)?;
+            job.status = next;
+            job.status_reason.clone_from(&reason);
+            if next == JobStatus::Running && job.started_at.is_none() {
+                job.started_at = Some(Utc::now());
+            }
+            if next.is_finished() {
+                job.finished_at = Some(Utc::now());
+            }
+            (job.id, next)
+        };
+
+        self.journal(&JournalRecord::JobStatusChanged {
+            job_id,
+            status: next,
+            reason,
+            at: Utc::now(),
+        });
         Ok(())
     }
 
@@ -278,6 +305,7 @@ pub struct Coordinator {
     pub(crate) scheduler: Box<dyn Scheduler>,
     pub(crate) jobs: DashMap<JobId, Arc<JobHandle>>,
     pub(crate) cluster_agents: AtomicUsize,
+    pub(crate) journal: Arc<dyn Journal>,
 }
 
 impl std::fmt::Debug for Coordinator {
@@ -311,7 +339,53 @@ impl Coordinator {
             gateway,
             jobs: DashMap::new(),
             cluster_agents: AtomicUsize::new(0),
+            // Journalling is on by default but non-durable; `with_journal` swaps in a
+            // real one. That keeps the write path identical either way.
+            journal: Arc::new(MemoryJournal::new()),
         }
+    }
+
+    /// Journal every state change to `journal`, so this coordinator survives a restart.
+    #[must_use]
+    pub fn with_journal(mut self, journal: Arc<dyn Journal>) -> Self {
+        self.journal = journal;
+        self
+    }
+
+    /// Rebuild in-memory job state from the journal.
+    ///
+    /// Call once at start-up, before serving. Returns how many jobs were recovered.
+    ///
+    /// Tasks that were mid-flight when the process died are restored to `Created` so
+    /// the scheduler re-queues them; completed tasks keep their results and are never
+    /// run again. That is what makes a restart resume a job rather than redo it.
+    pub fn recover(&self) -> Result<usize> {
+        let records = self.journal.replay()?;
+        if records.is_empty() {
+            return Ok(0);
+        }
+
+        let mut recovering: HashMap<JobId, recovery::Recovering> = HashMap::new();
+        for record in records {
+            recovery::apply(&mut recovering, record);
+        }
+
+        let mut recovered = 0;
+        for (job_id, state) in recovering {
+            match state.build(self.config.event_buffer, Arc::clone(&self.journal)) {
+                Ok(handle) => {
+                    self.jobs.insert(job_id, Arc::new(handle));
+                    recovered += 1;
+                }
+                Err(error) => {
+                    // One unrecoverable job must not stop the others from coming back.
+                    tracing::error!(%job_id, %error, "could not recover job from journal");
+                }
+            }
+        }
+
+        tracing::info!(recovered, "recovered jobs from journal");
+        Ok(recovered)
     }
 
     /// A single-process coordinator with in-memory infrastructure.
@@ -384,7 +458,20 @@ impl Coordinator {
         job.status = job.status.transition(JobStatus::Planning)?;
         let graph = decompose::decompose(&job)?;
 
-        let handle = Arc::new(JobHandle::new(job, graph, self.config.event_buffer));
+        // The plan is journaled before the job is visible, so recovery can never see a
+        // job it has no graph for.
+        let planned = JournalRecord::JobPlanned {
+            job: Box::new(job.clone()),
+            tasks: graph.nodes().cloned().collect(),
+        };
+        self.journal.append(&planned)?;
+
+        let handle = Arc::new(JobHandle::new(
+            job,
+            graph,
+            self.config.event_buffer,
+            Arc::clone(&self.journal),
+        ));
         handle.emit(JobEventKind::JobAdmitted, None, "admitted", 0.0);
         {
             let graph = lock(&handle.graph);
