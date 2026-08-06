@@ -20,6 +20,7 @@ use clap::Parser;
 use swarm_api_server::{router, AppState};
 use swarm_coordinator::{Coordinator, CoordinatorConfig};
 use swarm_model_gateway::{Gateway, GatewayConfig, MockProvider, ModelProvider};
+use swarm_persistence::FileJournal;
 
 #[derive(Parser, Debug)]
 #[command(name = "swarm-api", version, about = "HTTP API for the swarm platform")]
@@ -31,6 +32,11 @@ struct Cli {
     /// Platform configuration file; see `config/example.toml`.
     #[arg(long, env = "SWARM_CONFIG")]
     config: Option<PathBuf>,
+
+    /// Append-only journal file. With one, jobs survive a restart of this process;
+    /// without one, they live only as long as it does.
+    #[arg(long, env = "SWARM_JOURNAL")]
+    journal: Option<PathBuf>,
 
     /// Default log level when `RUST_LOG` is unset.
     #[arg(long, default_value = "info")]
@@ -74,7 +80,23 @@ async fn main() -> Result<()> {
     // touching anything above the traits.
     let provider: Arc<dyn ModelProvider> = Arc::new(MockProvider::new("mock"));
     let gateway = Arc::new(Gateway::new(config.gateway).and_provider(provider));
-    let coordinator = Arc::new(Coordinator::local_with(config.coordinator, gateway));
+    let mut coordinator = Coordinator::local_with(config.coordinator, gateway);
+
+    if let Some(path) = &cli.journal {
+        let journal = Arc::new(
+            FileJournal::open(path)
+                .with_context(|| format!("opening journal {}", path.display()))?,
+        );
+        coordinator = coordinator.with_journal(journal);
+
+        // Recover before serving, so a client never sees a job that is about to be
+        // resurrected under it.
+        let recovered = coordinator.recover().context("recovering from journal")?;
+        if recovered > 0 {
+            println!("recovered {recovered} jobs from {}", path.display());
+        }
+    }
+    let coordinator = Arc::new(coordinator);
 
     let listener = tokio::net::TcpListener::bind(cli.bind)
         .await
