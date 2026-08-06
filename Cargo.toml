@@ -18,6 +18,7 @@ swarm-model-gateway = { path = "crates/model-gateway" }
 swarm-agent-runtime = { path = "crates/agent-runtime" }
 swarm-coordinator = { path = "crates/coordinator" }
 swarm-api-server = { path = "crates/api-server" }
+swarm-persistence = { path = "crates/persistence" }
 
 # runtime
 tokio = { version = "1", default-features = false }
@@ -41,6 +42,7 @@ dashmap = "6"
 # errors, cli, logs
 thiserror = "2"
 anyhow = "1"
+tempfile = "3"
 clap = { version = "4", features = ["derive", "env"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
